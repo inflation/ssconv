@@ -3,6 +3,7 @@ use std::sync::mpsc;
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use image::Rgb;
+use tracing::{debug, info};
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
@@ -144,9 +145,11 @@ impl GpuContext {
             .await
             .wrap_err("request GPU adapter")?;
         let adapter_info = adapter.get_info();
-        println!(
-            "Using GPU: {} (type: {:?}, backend: {:?})",
-            adapter_info.name, adapter_info.device_type, adapter_info.backend
+        info!(
+            name = adapter_info.name,
+            device_type = ?adapter_info.device_type,
+            backend = ?adapter_info.backend,
+            "Using GPU"
         );
 
         let (device, queue) = adapter
@@ -183,6 +186,7 @@ impl GpuContext {
     fn convert(&mut self, input_rgba: &[u16], width: u32, height: u32) -> Result<ConvertOutput> {
         validate_input(input_rgba, width, height).wrap_err("validate input buffer")?;
         self.ensure_buffers(width, height);
+        debug!(width, height, "Converting image on GPU");
 
         let device = &self.device;
         let queue = &self.queue;
@@ -219,6 +223,7 @@ impl GpuContext {
             None => true,
         };
         if rebuild {
+            debug!(width, height, "Rebuilding GPU buffers");
             self.buffers = Some(GpuBuffers::new(
                 &self.device,
                 &self.bind_group_layout,
@@ -248,6 +253,7 @@ impl Converter {
     /// Returns an error if the GPU adapter or device cannot be initialized.
     pub fn new() -> Result<Self> {
         let gpu = pollster::block_on(GpuContext::new()).wrap_err("initialize GPU context")?;
+        info!("Initialized GPU converter");
         Ok(Self { gpu })
     }
 
@@ -258,21 +264,27 @@ impl Converter {
     /// Returns an error if the input image cannot be opened, the GPU conversion
     /// fails, or the output image cannot be written.
     pub fn convert_png_to_jpeg(&mut self, input_path: &Path, output_path: &Path) -> Result<()> {
+        info!(
+            input = %input_path.display(),
+            output = %output_path.display(),
+            "Converting PNG to JPEG"
+        );
         let image = image::open(input_path)
             .wrap_err_with(|| format!("open input image {}", input_path.display()))?;
         let image_rgba = image.into_rgba16();
         let (width, height) = image_rgba.dimensions();
+        debug!(width, height, "Loaded input image");
         let input_rgba = image_rgba.into_raw();
 
         let result = self
             .gpu
             .convert(&input_rgba, width, height)
             .wrap_err("convert image on GPU")?;
-        println!(
-            "Gain map: {}x{} ({} bytes)",
-            result.gain_width,
-            result.gain_height,
-            result.gain_map.len()
+        debug!(
+            gain_width = result.gain_width,
+            gain_height = result.gain_height,
+            gain_bytes = result.gain_map.len(),
+            "Computed gain map"
         );
 
         let out_img: image::ImageBuffer<Rgb<u8>, Vec<u8>> =
@@ -281,6 +293,7 @@ impl Converter {
         out_img
             .save(output_path)
             .wrap_err_with(|| format!("save output image {}", output_path.display()))?;
+        info!(output = %output_path.display(), "Wrote output image");
 
         Ok(())
     }
