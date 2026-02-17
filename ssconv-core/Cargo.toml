@@ -1,0 +1,8 @@
+[package]
+name = "ssconv-core"
+version = "0.1.0"
+
+[package.edition]
+workspace = true
+
+[dependencies]

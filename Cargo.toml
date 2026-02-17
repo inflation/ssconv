@@ -1,0 +1,9 @@
+[workspace]
+resolver = "3"
+members = [
+    "ssconv-core",
+    "ssconv-cli"
+]
+
+[workspace.package]
+edition = "2024"
