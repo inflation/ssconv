@@ -67,11 +67,11 @@ jj status
 # Show log
 jj log
 
-# Describe the current change
-jj describe -m "message"
+# Commit current working copy with a message (creates a new empty change after)
+jj commit -m "message"
 
-# Create a new change
-jj new
+# Squash working copy changes into the parent commit
+jj squash
 
 # Create a bookmark (branch)
 jj bookmark create <name>

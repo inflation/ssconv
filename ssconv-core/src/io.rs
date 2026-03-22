@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use image::{DynamicImage, ImageDecoder, ImageReader};
-use moxcms::ColorProfile;
+use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
+use moxcms::{CicpColorPrimaries, ColorProfile, TransferCharacteristics};
 use snafu::ResultExt;
 
 use crate::error::{ColorspaceDetectionSnafu, ImageDecodeSnafu, IoSnafu, SsconvError};
@@ -9,6 +9,7 @@ use crate::error::{ColorspaceDetectionSnafu, ImageDecodeSnafu, IoSnafu, SsconvEr
 /// A decoded image together with its detected colorspace.
 ///
 /// Colorspace priority: ICC profile > CICP metadata > sRGB fallback.
+#[derive(Debug)]
 pub struct SourceImage {
     pub image: DynamicImage,
     pub colorspace: ColorProfile,
@@ -25,6 +26,8 @@ pub fn load_image<P: AsRef<Path>>(path: P) -> Result<SourceImage, SsconvError> {
         .and_then(ImageReader::with_guessed_format)
         .context(IoSnafu)?;
 
+    let format = reader.format();
+
     let (icc_bytes, image) = reader
         .into_decoder()
         .and_then(|mut decoder| {
@@ -33,7 +36,7 @@ pub fn load_image<P: AsRef<Path>>(path: P) -> Result<SourceImage, SsconvError> {
         })
         .context(ImageDecodeSnafu)?;
 
-    let colorspace = detect_colorspace(icc_bytes, image.color_space())?;
+    let colorspace = detect_colorspace(icc_bytes, image.color_space(), format)?;
 
     Ok(SourceImage { image, colorspace })
 }
@@ -44,25 +47,25 @@ pub fn load_image<P: AsRef<Path>>(path: P) -> Result<SourceImage, SsconvError> {
 fn detect_colorspace(
     icc_bytes: Option<Vec<u8>>,
     cicp: image::metadata::Cicp,
+    format: Option<ImageFormat>,
 ) -> Result<ColorProfile, SsconvError> {
-    use image::metadata::{CicpColorPrimaries, CicpTransferCharacteristics};
-
     if let Some(bytes) = icc_bytes {
         return ColorProfile::new_from_slice(&bytes).context(ColorspaceDetectionSnafu);
     }
 
-    if matches!(cicp.primaries, CicpColorPrimaries::Unspecified)
-        || matches!(cicp.transfer, CicpTransferCharacteristics::Unspecified)
-        || (cicp.primaries == CicpColorPrimaries::SRgb
-            && cicp.transfer == CicpTransferCharacteristics::SRgb)
-    {
-        return Ok(ColorProfile::new_srgb());
+    // HDR and EXR files store scene-referred linear light with BT.709 primaries.
+    if matches!(format, Some(ImageFormat::Hdr | ImageFormat::OpenExr)) {
+        return Ok(ColorProfile::new_from_cicp(moxcms::CicpProfile {
+            color_primaries: CicpColorPrimaries::Bt709,
+            transfer_characteristics: TransferCharacteristics::Linear,
+            matrix_coefficients: moxcms::MatrixCoefficients::Identity,
+            full_range: true,
+        }));
     }
 
     // Both enums are #[repr(u8)] and follow ITU-T H.273, so the u8 values match moxcms.
-    let primaries = moxcms::CicpColorPrimaries::try_from(cicp.primaries as u8)
-        .context(ColorspaceDetectionSnafu)?;
-    let transfer = moxcms::TransferCharacteristics::try_from(cicp.transfer as u8)
+    let (primaries, transfer) = CicpColorPrimaries::try_from(cicp.primaries as u8)
+        .and_then(|p| TransferCharacteristics::try_from(cicp.transfer as u8).map(|t| (p, t)))
         .context(ColorspaceDetectionSnafu)?;
 
     // DynamicImage only tracks primaries and transfer; matrix is always Identity for RGB.
@@ -79,12 +82,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn load_rec2020_sample() {
+    fn load_samples() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../samples/rec2020.png");
         let loaded = load_image(path).expect("should load rec2020.png");
+        dbg!(&loaded.colorspace);
         assert!(
             loaded.colorspace.cicp.is_some() || loaded.colorspace.red_trc.is_some(),
             "rec2020.png should have a non-trivial color profile"
+        );
+
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../samples/1.hdr");
+        let loaded = load_image(path).expect("should load 1.hdr");
+        dbg!(&loaded.colorspace);
+        assert!(
+            loaded.colorspace.cicp.is_some() || loaded.colorspace.red_trc.is_some(),
+            "1.hdr should have a non-trivial color profile"
         );
     }
 }
