@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`ssconv` is a Rust workspace for image colorspace conversion. It reads images with ICC profiles and converts them between colorspaces (e.g., Rec. 2020).
+`ssconv` is a Rust workspace for image colorspace conversion. It reads images, detects their colorspace (priority: ICC profile > CICP > fallback sRGB), and converts between colorspaces (e.g., Rec. 2020).
 
 ## Workspace Structure
 
-- **`ssconv-core`** — library crate with shared logic: error types (`snafu`) and image I/O (`image` crate)
-- **`ssconv-cli`** — binary crate that uses `ssconv-core` and `moxcms` for ICC profile parsing and colorspace conversion
+- **`ssconv-core`** — library crate with shared logic: error types (`snafu`), image I/O (`image` crate), and ICC profile parsing (`moxcms`)
+- **`ssconv-cli`** — binary crate that uses `ssconv-core` and `moxcms` (avx512) for colorspace conversion
 
 ## Commands
 
@@ -36,6 +36,15 @@ cargo clippy
 cargo check
 ```
 
+## Colorspace Detection Architecture
+
+- Colorspace priority: ICC profile > CICP > sRGB fallback — stored as `ColorProfile` directly on `SourceImage`
+- `moxcms` in both crates: `ssconv-core` (no features) and `ssconv-cli` (avx512, conversion)
+- `ColorProfile::new_from_cicp(CicpProfile)` synthesizes a profile from CICP; `new_srgb()` for fallback
+- `DynamicImage::color_space()` returns `image::metadata::Cicp` (primaries + transfer only; matrix/full_range are fixed)
+- `image` crate uses `moxcms 0.7.4` internally; `ssconv-core` uses `moxcms 0.8.0` — both coexist in the build
+- CICP enums in `image` and `moxcms` are both `#[repr(u8)]` per ITU-T H.273 — cast via `as u8` + `TryFrom<u8>`
+
 ## Key Dependencies
 
 - `image` — image decoding/encoding
@@ -45,7 +54,7 @@ cargo check
 
 ## Error Handling
 
-Errors use `snafu` with the `Snafu` derive macro. Error variants live in `ssconv-core/src/error.rs`. Use `snafu::ResultExt` and the generated `*Snafu` context selectors (e.g., `ImageOpenSnafu`) to attach context.
+Errors use `snafu` with the `Snafu` derive macro. Error variants live in `ssconv-core/src/error.rs`. Use `snafu::ResultExt` and the generated `*Snafu` context selectors (e.g., `IoSnafu`, `ImageDecodeSnafu`, `ColorspaceDetectionSnafu`).
 
 ## Version Control
 

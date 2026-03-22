@@ -891,6 +891,7 @@ name = "ssconv-core"
 version = "0.1.0"
 dependencies = [
  "image",
+ "moxcms 0.8.0",
  "snafu",
  "zerocopy",
 ]

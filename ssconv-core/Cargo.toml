@@ -7,6 +7,7 @@ workspace = true
 
 [dependencies]
 image = { version = "=0.25.8" }
+moxcms = "0.8.0"
 snafu = "0.8"
 zerocopy = { version = "0.8", features = ["derive"] }
 
