@@ -7,7 +7,8 @@ workspace = true
 
 [dependencies]
 image = { version = "=0.25.8" }
-moxcms = "0.8.0"
+jxl-oxide = { version = "0.12.5", features = ["image"] }
+moxcms = { version = "0.8.0", features = ["extended_range"] }
 snafu = "0.8"
 zerocopy = { version = "0.8", features = ["derive"] }
 

@@ -1,3 +1,4 @@
+mod convert;
 mod error;
 mod io;
 

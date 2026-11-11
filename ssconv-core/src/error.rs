@@ -9,4 +9,6 @@ pub enum SsconvError {
     ImageDecode { source: image::ImageError },
     #[snafu(display("Failed to detect colorspace: {source}"))]
     ColorspaceDetection { source: moxcms::CmsError },
+    #[snafu(display("Failed to convert colorspace: {source}"))]
+    ColorspaceConversion { source: moxcms::CmsError },
 }
