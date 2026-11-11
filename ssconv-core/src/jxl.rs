@@ -1,6 +1,9 @@
 use std::io::{BufReader, Read, Seek};
 
-use image::{DynamicImage, Rgba32FImage};
+use image::{
+    DynamicImage, ImageError, Rgba32FImage,
+    error::{DecodingError, ImageFormatHint},
+};
 use jxl::api::{
     Event, JxlColorEncoding, JxlColorProfile, JxlDecoder, JxlDecoderOptions, JxlOutputBuffer,
     JxlPixelFormat, JxlPrimaries, JxlTransferFunction, JxlWhitePoint,
@@ -13,12 +16,12 @@ use zerocopy::IntoBytes;
 
 use crate::{
     SourceImage, SsconvError,
-    error::{ColorspaceDetectionSnafu, JxlDecodeSnafu},
+    error::{ColorspaceDetectionSnafu, ImageDecodeSnafu},
 };
 
 fn invalid(message: &str) -> SsconvError {
-    SsconvError::InvalidImage {
-        message: message.into(),
+    SsconvError::ImageDecode {
+        source: ImageError::Decoding(DecodingError::new(format_hint(), message.to_owned())),
     }
 }
 
@@ -26,7 +29,8 @@ pub(crate) fn load(mut input: BufReader<impl Read + Seek>) -> Result<SourceImage
     let mut decoder = JxlDecoder::new(JxlDecoderOptions::default());
     if decoder
         .process(&mut input, None, None)
-        .context(JxlDecodeSnafu)?
+        .map_err(decode_error)
+        .context(ImageDecodeSnafu)?
         != Event::BasicInfo
     {
         return Err(invalid("truncated JPEG XL header"));
@@ -37,7 +41,8 @@ pub(crate) fn load(mut input: BufReader<impl Read + Seek>) -> Result<SourceImage
         .clone();
     decoder
         .set_pixel_format(JxlPixelFormat::rgba_f32(info.extra_channels.len()))
-        .context(JxlDecodeSnafu)?;
+        .map_err(decode_error)
+        .context(ImageDecodeSnafu)?;
     let profile = decoder
         .output_color_profile()
         .ok_or_else(|| invalid("missing JPEG XL color profile"))?;
@@ -65,7 +70,8 @@ pub(crate) fn load(mut input: BufReader<impl Read + Seek>) -> Result<SourceImage
     loop {
         match decoder
             .process(&mut input, Some(std::slice::from_mut(&mut output)), None)
-            .context(JxlDecodeSnafu)?
+            .map_err(decode_error)
+            .context(ImageDecodeSnafu)?
         {
             Event::FrameHeader => {}
             Event::FrameComplete { .. } => break,
@@ -117,4 +123,12 @@ fn color_profile(profile: &JxlColorProfile) -> Result<ColorProfile, SsconvError>
         .try_as_icc()
         .ok_or_else(|| invalid("JPEG XL color encoding has no usable ICC profile"))?;
     ColorProfile::new_from_slice(icc.as_ref()).context(ColorspaceDetectionSnafu)
+}
+
+fn format_hint() -> ImageFormatHint {
+    ImageFormatHint::Name("JPEG XL".into())
+}
+
+fn decode_error(source: jxl::error::Error) -> ImageError {
+    ImageError::Decoding(DecodingError::new(format_hint(), source))
 }

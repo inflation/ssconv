@@ -13,8 +13,6 @@ pub enum SsconvError {
     ColorspaceDetection { source: moxcms::CmsError },
     #[snafu(display("Failed to convert colorspace: {source}"))]
     ColorspaceConversion { source: moxcms::CmsError },
-    #[snafu(display("JPEG XL decoding failed: {source}"))]
-    JxlDecode { source: jxl::error::Error },
     #[snafu(display("Gain map encoding failed: {source}"))]
     GainMap { source: ultrahdr_rs::Error },
     #[snafu(display("Invalid image: {message}"))]

@@ -10,7 +10,7 @@ use crate::{
     error::{GainMapSnafu, ImageDecodeSnafu, ImageEncodeSnafu},
 };
 
-/// Settings for an SDR-compatible Ultra HDR JPEG with an embedded RGB gain map.
+/// Settings for an SDR-compatible ISO Gain Map JPEG with an embedded RGB gain map.
 #[derive(Debug, Clone, Copy)]
 pub struct GainMapOptions {
     /// Override cd/m² represented by 1.0 after linearization. Automatic defaults:

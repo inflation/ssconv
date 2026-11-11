@@ -77,5 +77,30 @@ fn truncated_jxl_returns_error() {
     std::fs::write(&path, [0xff, 0x0a, 0]).unwrap();
     let loaded = load_image(&path);
     std::fs::remove_file(path).unwrap();
-    assert!(loaded.is_err());
+    let ssconv_core::SsconvError::ImageDecode {
+        source: image::ImageError::Decoding(error),
+    } = loaded.unwrap_err()
+    else {
+        panic!("JXL failures must be image decoding errors");
+    };
+    assert!(std::error::Error::source(&error).is_some());
+}
+
+#[test]
+fn malformed_jxl_retains_the_original_decoder_error() {
+    let path = std::env::temp_dir().join(format!("ssconv-{}-malformed.jxl", std::process::id()));
+    std::fs::write(&path, [0; 16]).unwrap();
+    let loaded = load_image(&path);
+    std::fs::remove_file(path).unwrap();
+    let ssconv_core::SsconvError::ImageDecode {
+        source: image::ImageError::Decoding(error),
+    } = loaded.unwrap_err()
+    else {
+        panic!("JXL failures must be image decoding errors");
+    };
+    let source = std::error::Error::source(&error).unwrap();
+    assert!(
+        source.downcast_ref::<jxl::error::Error>().is_some(),
+        "the original jxl error must remain in the source chain"
+    );
 }

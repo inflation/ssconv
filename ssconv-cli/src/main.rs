@@ -27,7 +27,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let jpeg = extension.eq_ignore_ascii_case("jpg") || extension.eq_ignore_ascii_case("jpeg");
     let exr = extension.eq_ignore_ascii_case("exr");
     if !jpeg && !exr {
-        return Err("Output must be .jpg/.jpeg (Ultra HDR gain map) or .exr (linear HDR)".into());
+        return Err(
+            "Output must be .jpg/.jpeg (ISO Gain Map gain map) or .exr (linear HDR)".into(),
+        );
     }
     if exr && options.reference_white_nits.is_some() {
         return Err("--reference-white-nits applies to gain-map JPEG output only".into());

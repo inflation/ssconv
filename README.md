@@ -14,7 +14,7 @@ cargo run --release -p ssconv-cli -- screenshot.jxl screenshot.exr
 
 ## Gain-map JPEG output
 
-`.jpg` and `.jpeg` produce an Ultra HDR JPEG: ordinary viewers show a tone-mapped
+`.jpg` and `.jpeg` produce an ISO Gain Map JPEG: ordinary viewers show a tone-mapped
 SDR base image; compatible HDR viewers reconstruct HDR using the embedded RGB
 gain map. The file includes MPF, an sRGB ICC profile, Adobe HDR gain-map XMP, and
 ISO 21496-1 metadata. JPEG container/metadata assembly uses `ultrahdr-rs` 0.3.5;
