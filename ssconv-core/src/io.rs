@@ -26,7 +26,7 @@ pub struct SourceImage {
 /// Returns an error if the file cannot be opened, the format cannot be determined,
 /// the image data is invalid, or an embedded ICC profile cannot be parsed.
 pub fn load_image<P: AsRef<Path>>(path: P) -> Result<SourceImage, SsconvError> {
-    // image 0.25 has no built-in JPEG XL decoder. Sniff both codestream and
+    // Use jxl-rs for JPEG XL. Sniff both codestream and
     // container signatures, so renamed screenshots work as well as .jxl files.
     let mut file = BufReader::new(File::open(&path).context(IoSnafu)?);
     let signature = file.fill_buf().context(IoSnafu)?;
@@ -37,14 +37,7 @@ pub fn load_image<P: AsRef<Path>>(path: P) -> Result<SourceImage, SsconvError> {
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("jxl"))
     {
-        let mut decoder =
-            jxl_oxide::integration::JxlDecoder::new(file).context(ImageDecodeSnafu)?;
-        // This is the profile of the *rendered* pixels, including JXL's native
-        // color encoding when no ICC was embedded. Never assume sRGB here.
-        let icc = decoder.icc_profile().context(ImageDecodeSnafu)?;
-        let image = DynamicImage::from_decoder(decoder).context(ImageDecodeSnafu)?;
-        let colorspace = detect_colorspace(icc, image.color_space(), None)?;
-        return Ok(SourceImage { image, colorspace });
+        return crate::jxl::load(file);
     }
 
     let reader = ImageReader::open(&path)

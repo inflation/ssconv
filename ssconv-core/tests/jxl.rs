@@ -20,7 +20,7 @@ fn linear() -> ColorProfile {
 #[test]
 fn scrgb_preserves_negative_and_hdr_float_samples() {
     let source = load_image(fixture("scrgb.jxl")).unwrap();
-    assert!(matches!(source.image, DynamicImage::ImageRgb32F(_)));
+    assert!(matches!(source.image, DynamicImage::ImageRgba32F(_)));
     assert_eq!(source.image.dimensions(), (2, 1));
     let converted = source.convert(&linear()).unwrap();
     for (actual, expected) in converted
@@ -45,7 +45,7 @@ fn container_preserves_float_alpha() {
 fn pq_and_hlg_use_rec2020_instead_of_srgb() {
     for (file, expected) in [("pq.jxl", 0.009_225), ("hlg.jxl", 0.050_701)] {
         let source = load_image(fixture(file)).unwrap();
-        assert!(matches!(source.image, DynamicImage::ImageRgb16(_)));
+        assert!(matches!(source.image, DynamicImage::ImageRgba32F(_)));
         let converted = source.convert(&linear()).unwrap();
         // Equal encoded RGB is neutral. PQ 0.5 is ~92 nits / 10000;
         // HLG 0.5 is ~(1/12)^1.2 display-linear at the default peak,
