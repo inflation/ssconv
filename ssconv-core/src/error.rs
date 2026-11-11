@@ -7,6 +7,12 @@ pub enum SsconvError {
     Io { source: std::io::Error },
     #[snafu(display("Failed to decode image: {source}"))]
     ImageDecode { source: image::ImageError },
+    #[snafu(display("Failed to encode image: {source}"))]
+    ImageEncode { source: image::ImageError },
     #[snafu(display("Failed to detect colorspace: {source}"))]
     ColorspaceDetection { source: moxcms::CmsError },
+    #[snafu(display("Failed to convert colorspace: {source}"))]
+    ColorspaceConversion { source: moxcms::CmsError },
+    #[snafu(display("Invalid image: {message}"))]
+    InvalidImage { message: String },
 }

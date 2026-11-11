@@ -1,4 +1,8 @@
-use std::path::Path;
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+    path::Path,
+};
 
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
 use moxcms::{CicpColorPrimaries, ColorProfile, TransferCharacteristics};
@@ -22,6 +26,20 @@ pub struct SourceImage {
 /// Returns an error if the file cannot be opened, the format cannot be determined,
 /// the image data is invalid, or an embedded ICC profile cannot be parsed.
 pub fn load_image<P: AsRef<Path>>(path: P) -> Result<SourceImage, SsconvError> {
+    // Use jxl-rs for JPEG XL. Sniff both codestream and
+    // container signatures, so renamed screenshots work as well as .jxl files.
+    let mut file = BufReader::new(File::open(&path).context(IoSnafu)?);
+    let signature = file.fill_buf().context(IoSnafu)?;
+    if signature.starts_with(&[0xff, 0x0a])
+        || signature.starts_with(b"\0\0\0\x0cJXL \r\n\x87\n")
+        || path
+            .as_ref()
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("jxl"))
+    {
+        return crate::jxl::load(file);
+    }
+
     let reader = ImageReader::open(&path)
         .and_then(ImageReader::with_guessed_format)
         .context(IoSnafu)?;
@@ -82,21 +100,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn load_samples() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../samples/rec2020.png");
-        let loaded = load_image(path).expect("should load rec2020.png");
-        dbg!(&loaded.colorspace);
-        assert!(
-            loaded.colorspace.cicp.is_some() || loaded.colorspace.red_trc.is_some(),
-            "rec2020.png should have a non-trivial color profile"
-        );
+    fn detects_linear_hdr_and_exr() {
+        for format in [ImageFormat::Hdr, ImageFormat::OpenExr] {
+            let profile =
+                detect_colorspace(None, image::metadata::Cicp::SRGB, Some(format)).unwrap();
+            assert_eq!(
+                profile.cicp.unwrap().transfer_characteristics,
+                TransferCharacteristics::Linear
+            );
+        }
+    }
 
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../samples/1.hdr");
-        let loaded = load_image(path).expect("should load 1.hdr");
-        dbg!(&loaded.colorspace);
+    #[test]
+    fn icc_takes_priority_and_invalid_icc_is_reported() {
         assert!(
-            loaded.colorspace.cicp.is_some() || loaded.colorspace.red_trc.is_some(),
-            "1.hdr should have a non-trivial color profile"
+            detect_colorspace(
+                Some(vec![0; 4]),
+                image::metadata::Cicp::SRGB,
+                Some(ImageFormat::Hdr)
+            )
+            .is_err()
+        );
+        let profile = detect_colorspace(None, image::metadata::Cicp::SRGB, None).unwrap();
+        assert_eq!(
+            profile.cicp.unwrap().transfer_characteristics,
+            TransferCharacteristics::Srgb
         );
     }
 }
