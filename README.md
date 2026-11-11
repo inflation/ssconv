@@ -16,11 +16,15 @@ cargo run --release -p ssconv-cli -- screenshot.jxl screenshot.exr
 
 `.jpg` and `.jpeg` produce an ISO Gain Map JPEG: ordinary viewers show a tone-mapped
 SDR base image; compatible HDR viewers reconstruct HDR using the embedded RGB
-gain map. The file includes MPF, an sRGB ICC profile, Adobe HDR gain-map XMP, and
-ISO 21496-1 metadata. JPEG container/metadata assembly uses `ultrahdr-rs` 0.3.5;
-JPEG compression uses `image`'s encoder, without native codec dependencies.
+gain map. The file includes MPF, a matching RGB ICC profile, Adobe HDR gain-map XMP, and
+ISO 21496-1 metadata. JPEG container and metadata assembly are implemented in
+ssconv. JPEG compression uses `image`'s encoder; ICC profiles are generated with `moxcms`.
 
-Pixels are converted to linear BT.709 and normalized to 203 cd/m² SDR white.
+Native Rec. 2020 and Display P3 primaries are preserved through the base image
+and RGB gain map; other inputs use BT.709. The base uses an sRGB transfer curve
+with an ICC profile describing its actual primaries. Pixels are linearized and
+normalized to 203 cd/m² SDR white. RenoDX / GT7-tonemapped Rec. 2020 PQ inputs
+are decoded as display-referred HDR, without another tone map on the HDR rendition.
 Defaults follow ReShade's screenshot encodings:
 
 | Source transfer | cd/m² represented by linearized 1.0 |
@@ -42,9 +46,8 @@ against the decoded lossy base JPEG, stored at full resolution with RGB channels
 and encoded at JPEG quality 95. Gain bounds are shared between the map encoding
 and its metadata, including for flat black / SDR-only images.
 
-JPEG export composites alpha over black and clips negative RGB after conversion
-to BT.709. It cannot preserve colors outside that gamut; use EXR when you need
-negative samples or alpha. No automatic content exposure adjustment is applied.
+JPEG export composites alpha over black and clips negative RGB in the working
+gamut. Use EXR when you need negative samples or alpha. No automatic content exposure adjustment is applied.
 
 ## Decoding and EXR output
 

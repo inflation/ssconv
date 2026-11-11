@@ -1,3 +1,6 @@
+#[path = "../../ssconv-core/tests/common/mod.rs"]
+#[allow(dead_code)]
+mod common;
 use std::{path::Path, process::Command};
 
 #[test]
@@ -51,12 +54,8 @@ fn jxl_to_gain_map_jpeg_contains_two_decodable_images() {
     );
     let bytes = std::fs::read(&output).unwrap();
     std::fs::remove_file(output).unwrap();
-    let decoder = ultrahdr_rs::Decoder::new(&bytes).unwrap();
-    assert!(decoder.is_ultrahdr());
-    for jpeg in [
-        decoder.primary_jpeg().unwrap(),
-        decoder.gainmap_jpeg().unwrap(),
-    ] {
+    let decoder = common::IsoJpeg::parse(&bytes);
+    for jpeg in [decoder.base, decoder.gain] {
         let image = image::load_from_memory(jpeg).unwrap();
         assert_eq!((image.width(), image.height()), (2, 1));
     }

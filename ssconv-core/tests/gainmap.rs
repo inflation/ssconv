@@ -3,7 +3,8 @@ use moxcms::{
     CicpColorPrimaries, CicpProfile, ColorProfile, MatrixCoefficients, TransferCharacteristics,
 };
 use ssconv_core::{GainMapOptions, SourceImage};
-use ultrahdr_rs::Decoder;
+mod common;
+use common::IsoJpeg;
 
 fn source(transfer: TransferCharacteristics, level: f32, alpha: f32) -> SourceImage {
     SourceImage {
@@ -22,17 +23,11 @@ fn source(transfer: TransferCharacteristics, level: f32, alpha: f32) -> SourceIm
 }
 
 fn reconstruct(bytes: &[u8]) -> f64 {
-    let decoder = Decoder::new(bytes).unwrap();
-    assert!(decoder.is_ultrahdr());
-    let metadata = decoder.metadata().unwrap();
-    metadata.validate().unwrap();
+    let decoder = IsoJpeg::parse(bytes);
+    let metadata = &decoder.metadata;
     assert!(metadata.alternate_hdr_headroom > 0.0);
-    let base = image::load_from_memory(decoder.primary_jpeg().unwrap())
-        .unwrap()
-        .to_rgb8();
-    let map = image::load_from_memory(decoder.gainmap_jpeg().unwrap())
-        .unwrap()
-        .to_rgb8();
+    let base = image::load_from_memory(decoder.base).unwrap().to_rgb8();
+    let map = image::load_from_memory(decoder.gain).unwrap().to_rgb8();
     assert_eq!(map.dimensions(), base.dimensions());
     let value = f64::from(base.get_pixel(16, 16).0[0]) / 255.0;
     let linear = if value <= 0.04045 {
@@ -58,11 +53,9 @@ fn hdr_reconstruction_uses_absolute_luminance_for_each_transfer() {
         let encoded = source(transfer, level, 1.0)
             .encode_gain_map(GainMapOptions::default())
             .unwrap();
-        let decoder = Decoder::new(&encoded).unwrap();
+        let decoder = IsoJpeg::parse(&encoded);
         assert!(
-            (decoder.metadata().unwrap().alternate_hdr_headroom.exp2() / (1000.0 / 203.0) - 1.0)
-                .abs()
-                < 0.001
+            (decoder.metadata.alternate_hdr_headroom.exp2() / (1000.0 / 203.0) - 1.0).abs() < 0.001
         );
         let actual = reconstruct(&encoded);
         let expected = 1000.0 / 203.0;
@@ -126,4 +119,42 @@ fn black_sdr_and_invalid_inputs_are_handled() {
             .encode_gain_map(GainMapOptions::default())
             .is_err()
     );
+}
+
+#[test]
+fn wide_gamut_primaries_survive_in_the_base_profile_and_hdr_rendition() {
+    use image::ImageDecoder;
+    for primaries in [CicpColorPrimaries::Bt2020, CicpColorPrimaries::Smpte432] {
+        let input = SourceImage {
+            image: DynamicImage::ImageRgba32F(Rgba32FImage::from_pixel(
+                32,
+                32,
+                Rgba([12.5, 0.0, 0.0, 1.0]),
+            )),
+            colorspace: ColorProfile::new_from_cicp(CicpProfile {
+                color_primaries: primaries,
+                transfer_characteristics: TransferCharacteristics::Linear,
+                matrix_coefficients: MatrixCoefficients::Identity,
+                full_range: true,
+            }),
+        };
+        let bytes = input.encode_gain_map(GainMapOptions::default()).unwrap();
+        let jpeg = IsoJpeg::parse(&bytes);
+        let mut decoder = image::ImageReader::new(std::io::Cursor::new(jpeg.base))
+            .with_guessed_format()
+            .unwrap()
+            .into_decoder()
+            .unwrap();
+        let profile =
+            ColorProfile::new_from_slice(&decoder.icc_profile().unwrap().unwrap()).unwrap();
+        let cicp = profile.cicp.unwrap();
+        assert_eq!(cicp.color_primaries, primaries);
+        assert_eq!(cicp.transfer_characteristics, TransferCharacteristics::Srgb);
+        // A saturated primary remains in its native space. Applying a 2020/P3
+        // to 709 matrix and clipping before export would change this rendition.
+        assert!((reconstruct(&bytes) / (1000.0 / 203.0) - 1.0).abs() < 0.04);
+        let base = image::load_from_memory(jpeg.base).unwrap().to_rgb8();
+        assert!(base.get_pixel(16, 16).0[1] < 3);
+        assert!(base.get_pixel(16, 16).0[2] < 3);
+    }
 }

@@ -1,13 +1,13 @@
-use image::{ExtendedColorType, RgbImage, codecs::jpeg::JpegEncoder};
+use crate::iso_jpeg::{self, Metadata};
+use image::{ExtendedColorType, ImageEncoder, RgbImage, codecs::jpeg::JpegEncoder};
 use moxcms::{
     CicpColorPrimaries, CicpProfile, ColorProfile, MatrixCoefficients, TransferCharacteristics,
 };
 use snafu::ResultExt;
-use ultrahdr_rs::{ColorGamut, GainMapMetadata, encode_ultrahdr};
 
 use crate::{
     SourceImage, SsconvError,
-    error::{GainMapSnafu, ImageDecodeSnafu, ImageEncodeSnafu},
+    error::{ColorspaceConversionSnafu, ImageDecodeSnafu, ImageEncodeSnafu},
 };
 
 /// Settings for an SDR-compatible ISO Gain Map JPEG with an embedded RGB gain map.
@@ -32,7 +32,8 @@ impl Default for GainMapOptions {
 impl SourceImage {
     /// Encode a tone-mapped SDR JPEG plus an embedded HDR gain map (XMP and ISO
     /// 21496-1 metadata). Alpha is composited over black and negative RGB is
-    /// clipped after conversion to BT.709. SDR white is 203 cd/m².
+    /// clipped in the working gamut. Native Rec. 2020 and Display P3 primaries
+    /// are preserved; other inputs use BT.709. SDR white is 203 cd/m².
     ///
     /// # Errors
     /// Returns an error for invalid options, non-finite pixels, color conversion,
@@ -56,8 +57,19 @@ impl SourceImage {
                 "reference white must be finite and positive; quality must be 1..=100",
             ));
         }
+        let primaries = match self.colorspace.cicp.as_ref().map(|c| c.color_primaries) {
+            Some(CicpColorPrimaries::Bt2020) => CicpColorPrimaries::Bt2020,
+            Some(CicpColorPrimaries::Smpte432) => CicpColorPrimaries::Smpte432,
+            _ => CicpColorPrimaries::Bt709,
+        };
+        let base_profile = ColorProfile::new_from_cicp(CicpProfile {
+            color_primaries: primaries,
+            transfer_characteristics: TransferCharacteristics::Srgb,
+            matrix_coefficients: MatrixCoefficients::Identity,
+            full_range: true,
+        });
         let linear = ColorProfile::new_from_cicp(CicpProfile {
-            color_primaries: CicpColorPrimaries::Bt709,
+            color_primaries: primaries,
             transfer_characteristics: TransferCharacteristics::Linear,
             matrix_coefficients: MatrixCoefficients::Identity,
             full_range: true,
@@ -84,7 +96,7 @@ impl SourceImage {
             sdr.0 = rgb.map(|v| byte(linear_to_srgb(v / (1.0 + maximum))));
             hdr.push(rgb);
         }
-        let base_jpeg = jpeg(&base, options.quality)?;
+        let base_jpeg = jpeg(&base, options.quality, Some(&base_profile))?;
         // Compute against the actual lossy base that viewers will reconstruct.
         let decoded_base = image::load_from_memory(&base_jpeg)
             .context(ImageDecodeSnafu)?
@@ -109,17 +121,16 @@ impl SourceImage {
         for (gain, pixel) in gains.iter().zip(gainmap.pixels_mut()) {
             pixel.0 = gain.map(|v| byte((v - minimum) / (maximum - minimum)));
         }
-        let mut metadata = GainMapMetadata::default();
-        metadata.gain_map_min = [minimum; 3];
-        metadata.gain_map_max = [maximum; 3];
-        metadata.alternate_hdr_headroom = peak.log2().max(0.000_001);
-        encode_ultrahdr(
+        let metadata = Metadata {
+            minimum,
+            maximum,
+            headroom: peak.log2().max(0.000_001),
+        };
+        iso_jpeg::encode(
             &base_jpeg,
-            &jpeg(&gainmap, options.quality)?,
+            &jpeg(&gainmap, options.quality, None)?,
             &metadata,
-            ColorGamut::Bt709,
         )
-        .context(GainMapSnafu)
     }
 }
 
@@ -129,9 +140,21 @@ fn invalid(message: &str) -> SsconvError {
     }
 }
 
-fn jpeg(image: &RgbImage, quality: u8) -> Result<Vec<u8>, SsconvError> {
+fn jpeg(
+    image: &RgbImage,
+    quality: u8,
+    profile: Option<&ColorProfile>,
+) -> Result<Vec<u8>, SsconvError> {
     let mut bytes = Vec::new();
-    JpegEncoder::new_with_quality(&mut bytes, quality)
+    let mut encoder = JpegEncoder::new_with_quality(&mut bytes, quality);
+    if let Some(profile) = profile {
+        let profile = profile.encode().context(ColorspaceConversionSnafu)?;
+        encoder
+            .set_icc_profile(profile)
+            .map_err(image::ImageError::Unsupported)
+            .context(ImageEncodeSnafu)?;
+    }
+    encoder
         .encode(
             image.as_raw(),
             image.width(),

@@ -1,6 +1,7 @@
 mod convert;
 mod error;
 mod io;
+mod iso_jpeg;
 mod jxl;
 
 pub use error::SsconvError;

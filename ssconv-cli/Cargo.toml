@@ -9,6 +9,3 @@ workspace = true
 ssconv-core = { path = "../ssconv-core" }
 image = { version = "0.25" }
 moxcms = { version = "0.8.0", features = ["avx512"] }
-
-[dev-dependencies]
-ultrahdr-rs = "=0.3.5"
